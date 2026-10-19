@@ -1,0 +1,18 @@
+# Data is never committed (license + size); see data/README.md
+data/*
+!data/README.md
+runs/
+wandb/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.DS_Store

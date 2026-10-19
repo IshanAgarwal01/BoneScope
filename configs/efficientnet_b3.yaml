@@ -1,0 +1,8 @@
+# Comparison CNN. Native resolution for this checkpoint is ~288-320; 288 keeps compute modest.
+inherit: base.yaml
+data:
+  img_size: 288
+model:
+  name: efficientnet_b3.ra2_in1k
+train:
+  batch_size: 48

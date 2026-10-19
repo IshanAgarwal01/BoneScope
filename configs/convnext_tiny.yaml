@@ -1,0 +1,4 @@
+# Primary model: ConvNeXt-Tiny, ImageNet-22k pretrained then 1k fine-tuned.
+inherit: base.yaml
+model:
+  name: convnext_tiny.fb_in22k_ft_in1k

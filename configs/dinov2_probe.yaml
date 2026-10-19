@@ -1,0 +1,13 @@
+# Frozen self-supervised features + linear head. Tells us how far
+# "generic features, no fine-tuning" gets on marrow cells.
+inherit: base.yaml
+data:
+  img_size: 224                 # patch14 -> 16x16 tokens
+model:
+  name: vit_small_patch14_dinov2.lvd142m
+  drop_path: 0.0
+  linear_probe_only: true
+train:
+  probe_epochs: 15
+  probe_lr: 1.0e-3
+  epochs: 0

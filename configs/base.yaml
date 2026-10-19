@@ -1,0 +1,45 @@
+# Shared defaults. Model configs set `inherit: base.yaml` and override only what differs.
+seed: 42
+
+data:
+  root: data/raw                # folder holding the image crops
+  splits_csv: splits/splits.csv # frozen folds; created once by scripts/make_splits.py
+  split_type: proxy             # which grouping's folds to use (patient | slide | proxy | stratified)
+  img_size: 224
+  num_workers: 4
+  stain_norm: false             # Reinhard via torchstain; inspect before/after examples before enabling
+  sampler: none                 # none | sqrt_inverse
+
+model:
+  name: convnext_tiny.fb_in22k_ft_in1k
+  pretrained: true
+  drop_path: 0.1
+  linear_probe_only: false      # true = frozen backbone throughout (DINOv2 baseline)
+
+loss:
+  name: ce                      # ce | cb_ce | focal
+  label_smoothing: 0.1
+  cb_beta: 0.999
+  focal_gamma: 2.0
+
+train:
+  batch_size: 64
+  probe_epochs: 2               # stage 1: frozen backbone, head only
+  probe_lr: 1.0e-3
+  epochs: 30                    # stage 2: full fine-tune (max; early stopping usually ends sooner)
+  warmup_epochs: 1
+  lr_head: 1.0e-3
+  lr_last: 3.0e-4
+  lr_middle: 1.0e-4
+  lr_early: 3.0e-5
+  min_lr: 1.0e-6
+  weight_decay: 0.05
+  grad_clip: 1.0
+  patience: 5                   # early stopping on validation macro-F1
+  amp: true                     # mixed precision; only ever used on CUDA
+  device: auto                  # auto = cuda -> mps -> cpu
+
+output:
+  dir: runs
+  run_name: null                # default: <config stem>_fold<k>
+  wandb: false
