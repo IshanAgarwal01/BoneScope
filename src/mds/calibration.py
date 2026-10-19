@@ -22,21 +22,25 @@ def softmax_np(logits: np.ndarray, temperature: float = 1.0) -> np.ndarray:
     return e / e.sum(axis=1, keepdims=True)
 
 
-def fit_temperature(logits: np.ndarray, labels: np.ndarray, max_iter: int = 200) -> float:
-    """Find T minimising validation negative log-likelihood (optimised in log T)."""
+def fit_temperature(
+    logits: np.ndarray, labels: np.ndarray, bounds: tuple[float, float] = (0.25, 10.0)
+) -> float:
+    """Find T minimising validation negative log-likelihood, within `bounds`.
+
+    Bounded because a validation set the model classifies perfectly makes the
+    NLL keep falling as T -> 0, which would turn every prediction into a fake
+    100% certainty. A bounded 1-D search (in log T) cannot run away like that.
+    """
+    from scipy.optimize import minimize_scalar
+
     x = torch.as_tensor(logits, dtype=torch.float64)
     y = torch.as_tensor(labels, dtype=torch.long)
-    log_t = torch.zeros(1, dtype=torch.float64, requires_grad=True)
-    opt = torch.optim.LBFGS([log_t], lr=0.1, max_iter=max_iter, line_search_fn="strong_wolfe")
 
-    def closure():
-        opt.zero_grad()
-        loss = F.cross_entropy(x / log_t.exp(), y)
-        loss.backward()
-        return loss
+    def nll(log_t: float) -> float:
+        return float(F.cross_entropy(x / np.exp(log_t), y))
 
-    opt.step(closure)
-    return float(log_t.exp())
+    res = minimize_scalar(nll, bounds=tuple(np.log(bounds)), method="bounded")
+    return float(np.exp(res.x))
 
 
 def expected_calibration_error(probs: np.ndarray, labels: np.ndarray, n_bins: int = 15) -> float:

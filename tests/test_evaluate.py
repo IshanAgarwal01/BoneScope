@@ -50,3 +50,10 @@ def test_temperature_scaling_fixes_overconfidence():
     assert t > 1.5 and after < before / 3
     # temperature never changes the predicted class
     assert (softmax_np(logits, t).argmax(1) == logits.argmax(1)).all()
+
+
+def test_temperature_is_bounded_on_separable_validation():
+    y = np.array([0, 1, 2] * 10)
+    logits = np.eye(3)[y] * 5.0  # perfectly separable: unbounded NLL wants T -> 0
+    t = fit_temperature(logits, y)
+    assert 0.25 <= t < 0.3

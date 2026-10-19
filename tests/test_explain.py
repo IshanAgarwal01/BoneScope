@@ -38,6 +38,7 @@ def test_border_heat_fraction():
     edge = np.zeros((100, 100))
     edge[:5] = 1
     assert border_heat_fraction(edge) == pytest.approx(1.0)
+    assert np.isnan(border_heat_fraction(np.zeros((10, 10))))
 
 
 def test_overlay_resizes_and_returns_uint8():

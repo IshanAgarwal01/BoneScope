@@ -98,7 +98,9 @@ def border_heat_fraction(cam: np.ndarray, border: float = 0.15) -> float:
     b_h, b_w = max(1, int(h * border)), max(1, int(w * border))
     total = float(cam.sum())
     if total <= 0:
-        return 0.0
+        # An all-zero map (e.g. a 1x1 feature map at tiny input sizes) carries no
+        # location information; NaN avoids reading it as "perfectly centred".
+        return float("nan")
     inner = float(cam[b_h : h - b_h, b_w : w - b_w].sum())
     return 1.0 - inner / total
 
