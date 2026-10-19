@@ -85,3 +85,11 @@ def test_class_list_matches_labels(splits):
     names = class_list(splits)
     assert names == sorted(names)
     assert len(names) == 5
+
+
+def test_inner_val_works_with_few_groups(grouped_df):
+    few = grouped_df[grouped_df["group"].isin([f"P{i}" for i in range(7)])]
+    splits = make_folds(few, "proxy")
+    inner = make_inner_val(splits)
+    for k in range(5):
+        partition(splits, inner, "proxy", k)  # raises on leakage

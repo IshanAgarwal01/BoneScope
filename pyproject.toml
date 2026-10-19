@@ -24,3 +24,7 @@ select = ["E", "F", "I", "W", "B", "UP"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-q"
+filterwarnings = [
+    # tiny synthetic test data has classes rarer than n_splits; expected
+    "ignore:The least populated class in y:UserWarning",
+]

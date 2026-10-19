@@ -89,9 +89,11 @@ def make_inner_val(
                 splitter = StratifiedKFold(n_splits=n_inner, shuffle=True, random_state=seed + k)
                 _, val_idx = next(splitter.split(pool, pool["label"]))
             else:
-                splitter = StratifiedGroupKFold(
-                    n_splits=n_inner, shuffle=True, random_state=seed + k
-                )
+                # Tiny datasets (tests, debugging) may have fewer groups than n_inner.
+                n = min(n_inner, pool["group"].nunique())
+                if n < 2:
+                    raise ValueError(f"[{split_type}] fold {k}: need >= 2 groups for validation")
+                splitter = StratifiedGroupKFold(n_splits=n, shuffle=True, random_state=seed + k)
                 _, val_idx = next(splitter.split(pool, pool["label"], groups=pool["group"]))
             for path in pool.loc[val_idx, "path"]:
                 rows.append({"split_type": split_type, "outer_fold": int(k), "path": path})
