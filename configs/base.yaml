@@ -6,8 +6,11 @@ data:
   splits_csv: splits/splits.csv # frozen folds; created once by scripts/make_splits.py
   split_type: proxy             # which grouping's folds to use (patient | slide | proxy | stratified)
   img_size: 224
+  resize_mode: resize           # resize | fixed_scale (keeps relative cell size; needs canvas_px)
+  canvas_px: null               # crop side (px) mapped to img_size in fixed_scale mode
   num_workers: 4
   stain_norm: false             # Reinhard via torchstain; inspect before/after examples before enabling
+  stain_ref: null               # reference crop (relative to data.root) for stain_norm
   sampler: none                 # none | sqrt_inverse
 
 model:

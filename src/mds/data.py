@@ -1,8 +1,4 @@
-"""Image indexing, filename analysis, and proxy grouping.
-
-Phase 1 only needs indexing and grouping; the Dataset, transforms and samplers
-are added in Phase 2.
-"""
+"""Image indexing, filename analysis, proxy grouping, transforms, Dataset, samplers."""
 
 from __future__ import annotations
 
@@ -14,7 +10,11 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import torch
 from PIL import Image
+from torch.utils.data import Dataset, WeightedRandomSampler
+from torchvision import transforms as T
+from torchvision.transforms import functional as TF
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
 
@@ -162,3 +162,167 @@ def cluster_class_purity(groups: np.ndarray, labels: np.ndarray) -> float:
     df = pd.DataFrame({"g": groups, "y": labels})
     majority = df.groupby("g")["y"].agg(lambda s: s.value_counts().iloc[0])
     return float(majority.sum() / len(df))
+
+
+# --- transforms, dataset, samplers, stain normalisation ---------------------
+
+IMAGENET_MEAN = (0.485, 0.456, 0.406)
+IMAGENET_STD = (0.229, 0.224, 0.225)
+
+
+class RandomRot90:
+    """Rotate by 0/90/180/270 degrees.
+
+    A cell on a smear has no "up", so every right-angle rotation is an equally
+    valid view. Right angles avoid the interpolation blur and black corners
+    that arbitrary-angle rotation would add.
+    """
+
+    def __call__(self, img: Image.Image) -> Image.Image:
+        k = int(torch.randint(0, 4, (1,)))
+        return img.rotate(90 * k) if k else img
+
+
+class FixedScalePad:
+    """Place the crop on a fixed canvas WITHOUT rescaling cells to fill it.
+
+    Plain resizing blows small cells up and shrinks large ones, so every cell
+    ends up the same size on screen, yet cell size is diagnostic (e.g. a
+    lymphocyte vs a blast vs a megakaryocyte). This mode scales every image by
+    one global factor (img_size / canvas_px) and pads with the crop's own
+    background colour, so relative size survives. Crops bigger than the canvas
+    are shrunk to fit (rare when canvas_px is set near the 99th percentile).
+    """
+
+    def __init__(self, img_size: int, canvas_px: int) -> None:
+        self.img_size = img_size
+        self.factor = img_size / canvas_px
+
+    def __call__(self, img: Image.Image) -> Image.Image:
+        w, h = img.size
+        scale = min(self.factor, self.img_size / max(w, h))
+        new = (max(1, round(w * scale)), max(1, round(h * scale)))
+        img = img.resize(new, Image.BILINEAR)
+        fill = tuple(int(v) for v in border_color_stats(img)[:3])
+        canvas = Image.new("RGB", (self.img_size, self.img_size), fill)
+        canvas.paste(img, ((self.img_size - new[0]) // 2, (self.img_size - new[1]) // 2))
+        return canvas
+
+
+def _size_transform(img_size: int, resize_mode: str, canvas_px: int | None):
+    if resize_mode == "resize":
+        # Crops are already square (box + 10%), so this does not distort shape.
+        return T.Resize((img_size, img_size), antialias=True)
+    if resize_mode == "fixed_scale":
+        if not canvas_px:
+            raise ValueError("resize_mode=fixed_scale needs data.canvas_px")
+        return FixedScalePad(img_size, canvas_px)
+    raise ValueError(f"Unknown resize_mode {resize_mode!r}")
+
+
+def build_transforms(
+    img_size: int,
+    train: bool,
+    mean: tuple[float, ...] = IMAGENET_MEAN,
+    std: tuple[float, ...] = IMAGENET_STD,
+    resize_mode: str = "resize",
+    canvas_px: int | None = None,
+) -> T.Compose:
+    """Training augmentation that respects what a haematologist looks at.
+
+    Included: flips and right-angle rotations (orientation is meaningless),
+    a small shift (the detector's box is not perfectly centred), mild
+    colour jitter (stain intensity varies between slides) and an occasional
+    light blur (focus varies).
+
+    Deliberately excluded:
+      * strong hue shifts / grayscale: Wright-Giemsa colour carries meaning
+        (basophilic blue cytoplasm in blasts, pink granules, purple nuclei).
+      * random-resized-crop / scale jitter: cell and nucleus size are
+        diagnostic, and cropping could cut away the nucleus or granules.
+      * CutMix / MixUp: pasting half of one cell onto another creates
+        morphology that does not exist and blurs the class boundary.
+    """
+    steps: list = [_size_transform(img_size, resize_mode, canvas_px)]
+    if train:
+        shift = max(1, int(0.05 * img_size))
+        steps += [
+            T.RandomHorizontalFlip(),
+            T.RandomVerticalFlip(),
+            RandomRot90(),
+            # Reflect-pad then crop back = a small shift without black borders.
+            T.Pad(shift, padding_mode="reflect"),
+            T.RandomCrop(img_size),
+            T.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.05, hue=0.02),
+            T.RandomApply([T.GaussianBlur(kernel_size=3, sigma=(0.1, 0.8))], p=0.2),
+        ]
+    steps += [T.ToTensor(), T.Normalize(mean, std)]
+    return T.Compose(steps)
+
+
+class ReinhardStainNormalizer:
+    """Reinhard colour normalisation (match LAB mean/std to a reference crop).
+
+    Off by default. It can remove stain variation that confuses the model,
+    but it can also wash out real colour differences between cell types, so
+    look at before/after examples (scripts/stain_preview.py) before enabling.
+    """
+
+    def __init__(self, reference: Image.Image) -> None:
+        import torchstain
+
+        self._norm = torchstain.normalizers.ReinhardNormalizer(backend="numpy")
+        self._norm.fit(np.asarray(reference.convert("RGB")))
+
+    def __call__(self, img: Image.Image) -> Image.Image:
+        out = self._norm.normalize(np.asarray(img.convert("RGB")))
+        return Image.fromarray(np.clip(out, 0, 255).astype(np.uint8))
+
+
+class MarrowDataset(Dataset):
+    """Single-cell crops listed in a splits DataFrame (columns: path, label)."""
+
+    def __init__(
+        self,
+        df: pd.DataFrame,
+        root: str | Path,
+        transform=None,
+        stain_normalizer: ReinhardStainNormalizer | None = None,
+    ) -> None:
+        self.paths = df["path"].tolist()
+        self.labels = df["label"].astype(int).tolist()
+        self.root = Path(root)
+        self.transform = transform
+        self.stain_normalizer = stain_normalizer
+
+    def __len__(self) -> int:
+        return len(self.paths)
+
+    def load(self, idx: int) -> Image.Image:
+        with Image.open(self.root / self.paths[idx]) as img:
+            img = img.convert("RGB")
+        if self.stain_normalizer is not None:
+            img = self.stain_normalizer(img)
+        return img
+
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, int]:
+        img = self.load(idx)
+        x = self.transform(img) if self.transform else TF.to_tensor(img)
+        return x, self.labels[idx]
+
+
+def sqrt_inverse_sampler(labels: list[int] | np.ndarray, seed: int = 42) -> WeightedRandomSampler:
+    """Sample each image with probability proportional to 1/sqrt(class count).
+
+    Full inverse-frequency sampling would show a 20-image class as often as a
+    3,000-image class, i.e. the same 20 images over and over (overfitting).
+    The square root is a compromise: rare classes are seen ~sqrt(ratio) times
+    more often than before, not ratio times.
+    """
+    labels = np.asarray(labels, dtype=int)
+    counts = np.bincount(labels)
+    weights = 1.0 / np.sqrt(counts[labels])
+    gen = torch.Generator().manual_seed(seed)
+    return WeightedRandomSampler(
+        torch.as_tensor(weights, dtype=torch.double), len(labels), replacement=True, generator=gen
+    )

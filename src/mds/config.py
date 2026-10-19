@@ -17,6 +17,7 @@ import yaml
 VALID_LOSSES = {"ce", "cb_ce", "focal"}
 VALID_SAMPLERS = {"none", "sqrt_inverse"}
 VALID_SPLIT_TYPES = {"patient", "slide", "proxy", "stratified"}
+VALID_RESIZE_MODES = {"resize", "fixed_scale"}
 
 
 @dataclass
@@ -25,8 +26,11 @@ class DataConfig:
     splits_csv: str = "splits/splits.csv"
     split_type: str = "proxy"
     img_size: int = 224
+    resize_mode: str = "resize"
+    canvas_px: int | None = None
     num_workers: int = 4
     stain_norm: bool = False
+    stain_ref: str | None = None
     sampler: str = "none"
 
 
@@ -87,6 +91,10 @@ class Config:
             raise ValueError(f"loss.name must be one of {VALID_LOSSES}, got {self.loss.name!r}")
         if self.data.sampler not in VALID_SAMPLERS:
             raise ValueError(f"data.sampler must be one of {VALID_SAMPLERS}")
+        if self.data.resize_mode not in VALID_RESIZE_MODES:
+            raise ValueError(f"data.resize_mode must be one of {VALID_RESIZE_MODES}")
+        if self.data.stain_norm and not self.data.stain_ref:
+            raise ValueError("data.stain_norm needs data.stain_ref (a reference crop path)")
         if self.data.split_type not in VALID_SPLIT_TYPES:
             raise ValueError(f"data.split_type must be one of {VALID_SPLIT_TYPES}")
         if self.data.sampler != "none" and self.loss.name == "cb_ce":
