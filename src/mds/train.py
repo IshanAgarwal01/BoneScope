@@ -44,7 +44,15 @@ from mds.models import (
     set_probe_mode,
 )
 from mds.splits import class_list, label_counts, load_splits, partition
-from mds.utils import CSVLogger, amp_enabled, get_device, get_logger, save_json, seed_everything
+from mds.utils import (
+    CSVLogger,
+    amp_enabled,
+    get_device,
+    get_logger,
+    load_json,
+    save_json,
+    seed_everything,
+)
 
 
 def _seed_worker(worker_id: int) -> None:
@@ -379,8 +387,15 @@ def main(argv: list[str] | None = None) -> dict:
     parser.add_argument("--config", required=True)
     parser.add_argument("--fold", type=int, required=True)
     parser.add_argument("--set", nargs="*", default=[], metavar="section.key=value")
+    parser.add_argument(
+        "--skip-done", action="store_true", help="skip if this fold already has metrics.json"
+    )
     args = parser.parse_args(argv)
     cfg = load_config(args.config, args.set)
+    done = run_dir_for(cfg, args.config, args.fold) / "metrics.json"
+    if args.skip_done and done.exists():
+        get_logger("mds").info("Skipping fold %d: %s exists", args.fold, done)
+        return load_json(done)
     return train_fold(cfg, args.fold, args.config)
 
 
